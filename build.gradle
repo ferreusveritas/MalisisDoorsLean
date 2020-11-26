@@ -1,0 +1,272 @@
+buildscript {
+	repositories {
+		mavenCentral()
+		maven {
+			name = 'sonatype-nexus-public'
+			url = 'https://oss.sonatype.org/content/repositories/public/'
+		}
+		maven {
+			name = 'forge-repo'
+			url = 'http://files.minecraftforge.net/maven/'
+		}
+		maven {
+			name = 'sponge'
+			url = 'http://repo.spongepowered.org/maven'
+		}
+	}
+	dependencies {
+		classpath 'net.minecraftforge.gradle:ForgeGradle:2.3-SNAPSHOT'
+		classpath 'org.spongepowered:mixingradle:0.6-SNAPSHOT'
+		classpath 'com.github.jengelman.gradle.plugins:shadow:2.0.0'
+	}
+}
+
+// Gradle plugins
+plugins {
+	id "maven"
+	id "signing"
+	id "com.matthewprenger.cursegradle" version "1.0.9"
+}
+
+apply plugin: 'net.minecraftforge.gradle.forge'
+apply plugin: 'org.spongepowered.mixin'
+apply plugin: 'com.github.johnrengelman.shadow'
+
+// Project repositories
+repositories {
+	mavenLocal()
+	mavenCentral()
+	maven {
+		name = 'sonatype-nexus-public'
+		url = 'https://oss.sonatype.org/content/repositories/public/'
+	}
+	maven {
+		name = 'sponge'
+		url = 'http://repo.spongepowered.org/maven'
+	}
+}
+
+// Project dependencies
+dependencies {
+	    compile('org.spongepowered:mixin:0.7.4-SNAPSHOT') {
+        exclude module: 'asm-commons'
+        exclude module: 'asm-tree'
+        exclude module: 'launchwrapper'
+        exclude module: 'guava'
+        exclude module: 'log4j-core'
+    }
+}
+
+// Gradle default tasks
+defaultTasks 'build', 'install'
+
+// Basic project information
+group = 'net.malisis'
+archivesBaseName = 'malisisdoors'
+version = '1.12.2-6.5.1'
+ext.packaging = 'jar'
+
+// Extended project information
+ext.projectName = 'MalisisCore'
+ext.description = 'MalisisCore is a framework dedicated to simplify many processes required during a mod development.'
+ext.url = 'http://github.com/Ordinastie/MalisisCore'
+
+
+// Compilation variables
+ext.buildNumber = project.hasProperty("buildNumber") ? buildNumber : '0'
+ext.ciSystem = project.hasProperty("ciSystem") ? ciSystem : 'unknown'
+ext.commit = project.hasProperty("commit") ? commit : 'unknown'
+
+sourceCompatibility = '1.8'
+targetCompatibility = '1.8'
+
+// MinecraftForge version
+minecraft {
+    version = "1.12.2-14.23.1.2589"
+    mappings = "snapshot_20180114"
+	
+	if(file("../../run").exists()) {
+		runDir = "../../run/assets"
+	}
+	else {
+		runDir = "run/assets"
+	}
+	
+	replace '${version}', project.version
+    replaceIn "MalisisDoors.java"
+}
+
+sourceSets {
+	main {
+		ext.refMap = "mixins.malisiscore.refmap.json"
+	}
+}
+
+// Filter, process, and include resources
+processResources {
+	inputs.property "version", version
+	inputs.property "mcversion", project.minecraft.version
+
+	// Include in final JAR
+	from 'LICENSE.txt'
+
+	// Replace variables
+	from('src/main/resources/mcmod.info') {
+		expand 'modid': archivesBaseName,
+				'name': projectName,
+				'description': project.ext.description,
+				'version': version,
+				'buildNumber': buildNumber,
+				'mcversion': minecraft.version,
+				'url': url
+	}
+}
+
+jar {
+    classifier 'base'
+	manifest {
+		attributes  "Built-By": "Ordinastie",
+					"Created-By": System.properties['java.vm.version'] + " (" + System.properties['java.vm.vendor'] + ")",
+					"Implementation-Title": name,
+					"Implementation-Version": version,
+					"Implementation-Vendor": url,
+					"FMLCorePlugin": "net.malisis.doors.asm.MalisisCorePlugin",
+					"FMLCorePluginContainsFMLMod": true,
+					"ForceLoadAsMod": true,
+					"TweakClass": "org.spongepowered.asm.launch.MixinTweaker",
+					"TweakOrder": 0,
+					"MixinConfigs": "mixins.malisiscore.core.json",
+					"FMLAT": "malisiscore_at.cfg"
+	}
+}
+
+if (JavaVersion.current().isJava8Compatible()) {
+	tasks.withType(Javadoc) {
+		// disable the crazy super-strict doclint tool in Java 8
+		options.addStringOption('Xdoclint:none', '-quiet')
+	}
+}
+
+// Javadoc JAR generation
+task javadocJar(type: Jar, dependsOn: javadoc) {
+	classifier = 'javadoc'
+	from 'build/docs/javadoc'
+}
+
+// Source JAR generation
+task sourcesJar(type: Jar) {
+	classifier = 'sources'
+	from sourceSets.main.java.srcDirs
+}
+
+// Create a JAR based on deobfuscated code
+task deobfJar(type: Jar) {
+	manifest.from jar.manifest
+	from sourceSets.main.output
+	classifier = 'dev'
+}
+
+shadowJar {
+	mainSpec.sourcePaths.clear()
+	dependsOn reobfJar
+	classifier ''
+	exclude 'dummyThing'
+	dependencies {
+		include dependency('org.spongepowered:mixin')
+	}
+	afterEvaluate {
+		from zipTree(reobfJar.jar)
+	}
+}
+
+makeStart {
+    // TODO do this properly with FG2
+    addReplacement("parseArgs(args);", "parseArgs(args); String __malisis_coremodProp = System.getProperty(\"fml.coreMods.load\", \"\");" +
+            "__malisis_coremodProp += \"net.malisis.doors.asm.MalisisCorePlugin\";" +
+            "System.setProperty(\"fml.coreMods.load\", __malisis_coremodProp);")
+}
+
+
+// Set all artifacts
+artifacts {
+	archives shadowJar, deobfJar, sourcesJar, javadocJar
+}
+
+// Deployment signing
+signing {
+	// Check if uploadArchives task is used
+	required { gradle.taskGraph.hasTask("uploadArchives") }
+	
+	// Sign JAR artifacts
+	sign configurations.archives
+}
+
+// Artifact deployment
+uploadArchives {
+	repositories.mavenDeployer {
+	
+	 	// Sign Maven POM
+		beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+	
+		def username = project.hasProperty('sonatypeUsername') ? project.getProperty('sonatypeUsername') : System.getenv("sonatypeUsername");
+		def password = project.hasProperty('sonatypePassword') ? project.getProperty('sonatypePassword') : System.getenv("sonatypePassword");
+
+		snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots") {
+			authentication(userName: username, password: password)
+		}
+		
+		repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2") {
+			authentication(userName: username, password: password)
+		}
+
+		// Maven POM generation
+		pom.project {
+			name projectName
+			artifactId archivesBaseName
+			packaging packaging
+			url url
+			description project.ext.description
+
+			scm {
+				connection 'scm:git:git://github.com/Ordinastie/MalisisCore.git'
+				developerConnection 'scm:git:ssh://git@github.com:Ordinastie/MalisisCore.git'
+				url 'https://github.com/Ordinastie/MalisisCore'
+			}
+
+			licenses {
+				license {
+					name 'The MIT License'
+					url 'http://www.tldrlegal.com/license/mit-license'
+					distribution 'repo'
+				}
+			}
+
+			developers {
+				developer {
+					id 'Ordinastie'
+					name 'Ordinastie'
+				}
+			}
+
+			issueManagement {
+				system 'github'
+				url 'https://github.com/Ordinastie/MalisisCore/issues'
+			}
+		}
+	}
+}
+
+if (project.hasProperty('curseapi')) {
+	curseforge {
+		apiKey = curseapi
+		project {
+			id = '223896'
+			releaseType = 'release'
+			
+			mainArtifact shadowJar
+			addArtifact deobfJar
+			addArtifact sourcesJar
+			addArtifact javadocJar			   		
+		}
+	}
+}
