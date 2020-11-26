@@ -14,3 +14,6 @@ the frame. Different types of frames implies different vanishing propagation beh
   - gold frames propagate to all frames around painted with the same block and the same metadata (ie red wool would not make a blue wool vanish)
   - diamond frames has their own GUI to configure their behavior. You can choose for each direction if they should propagate and the delay 
   - Frames not painted automatically propagate their state.
+
+Add this to VM Arguments when deving under Eclipse:
+   -Dfml.coreMods.load=net.malisis.doors.asm.MalisisCorePlugin
